@@ -8,6 +8,8 @@
 
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Config/llvm-config.h" // for LLVM_ENABLE_THREADS
 #include "llvm/ExecutionEngine/Orc/COFFPlatform.h"
@@ -55,7 +57,7 @@ Function *addHelperAndWrapper(Module &M, StringRef WrapperName,
                               GlobalValue::VisibilityTypes WrapperVisibility,
                               StringRef HelperName,
                               ArrayRef<Value *> HelperPrefixArgs) {
-  std::vector<Type *> HelperArgTypes;
+  SmallVector<Type *, 4> HelperArgTypes;
   for (auto *Arg : HelperPrefixArgs)
     HelperArgTypes.push_back(Arg->getType());
   llvm::append_range(HelperArgTypes, WrapperFnType->params());
@@ -71,7 +73,7 @@ Function *addHelperAndWrapper(Module &M, StringRef WrapperName,
   auto *EntryBlock = BasicBlock::Create(M.getContext(), "entry", WrapperFn);
   IRBuilder<> IB(EntryBlock);
 
-  std::vector<Value *> HelperArgs;
+  SmallVector<Value *, 4> HelperArgs;
   llvm::append_range(HelperArgs, HelperPrefixArgs);
   for (auto &Arg : WrapperFn->args())
     HelperArgs.push_back(&Arg);
@@ -320,7 +322,7 @@ private:
     if (!LookupResult)
       return LookupResult.takeError();
 
-    std::vector<ExecutorAddr> Initializers;
+    SmallVector<ExecutorAddr, 8> Initializers;
     while (!DFSLinkOrder.empty()) {
       auto &NextJD = *DFSLinkOrder.back();
       DFSLinkOrder.pop_back();
@@ -377,7 +379,7 @@ private:
     if (!LookupResult)
       return LookupResult.takeError();
 
-    std::vector<ExecutorAddr> DeInitializers;
+    SmallVector<ExecutorAddr, 8> DeInitializers;
     for (auto &NextJD : DFSLinkOrder) {
       auto DeInitsItr = LookupResult->find(NextJD.get());
       assert(DeInitsItr != LookupResult->end() &&
@@ -518,13 +520,10 @@ GlobalCtorDtorScraper::operator()(ThreadSafeModule TSM,
       // If there's no llvm.global_c/dtor or it's just a decl then skip.
       if (!GlobalCOrDtors || GlobalCOrDtors->isDeclaration())
         return Error::success();
-      std::string InitOrDeInitFunctionName;
-      if (isCtor)
-        raw_string_ostream(InitOrDeInitFunctionName)
-            << InitFunctionPrefix << M.getModuleIdentifier();
-      else
-        raw_string_ostream(InitOrDeInitFunctionName)
-            << DeInitFunctionPrefix << M.getModuleIdentifier();
+      SmallString<64> InitOrDeInitFunctionName;
+      raw_svector_ostream(InitOrDeInitFunctionName)
+          << (isCtor ? InitFunctionPrefix : DeInitFunctionPrefix)
+          << M.getModuleIdentifier();
 
       MangleAndInterner Mangle(PS.getExecutionSession(), M.getDataLayout());
       auto InternedInitOrDeInitName = Mangle(InitOrDeInitFunctionName);
@@ -536,7 +535,7 @@ GlobalCtorDtorScraper::operator()(ThreadSafeModule TSM,
           FunctionType::get(Type::getVoidTy(Ctx), {}, false),
           GlobalValue::ExternalLinkage, InitOrDeInitFunctionName, &M);
       InitOrDeInitFunc->setVisibility(GlobalValue::HiddenVisibility);
-      std::vector<std::pair<Function *, unsigned>> InitsOrDeInits;
+      SmallVector<std::pair<Function *, unsigned>, 8> InitsOrDeInits;
       auto COrDtors = isCtor ? getConstructors(M) : getDestructors(M);
 
       for (auto E : COrDtors)
